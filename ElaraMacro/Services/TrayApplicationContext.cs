@@ -376,7 +376,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             lock (_stateGate)
             {
-                SetStateStatus(AppState.Idle, "Idle");
+                SetStateStatus(AppState.Idle, "Idle"); // SetStateStatus is state-mutation only - no UI calls - safe to call under lock
             }
 
             RefreshUi();
@@ -481,7 +481,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         NativeMethods.UnregisterHotKey(_hotkeyWindow.Handle, HotkeyPlayId);
         NativeMethods.UnregisterHotKey(_hotkeyWindow.Handle, HotkeyPauseId);
         NativeMethods.UnregisterHotKey(_hotkeyWindow.Handle, HotkeyStopId);
-
 
         _storage.SaveSettings(_settings);
         _storage.SaveMacros(_macros);

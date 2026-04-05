@@ -39,6 +39,18 @@ public sealed class StorageService
         }
         catch
         {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Copy(path, path + ".corrupt", true);
+                }
+            }
+            catch
+            {
+                // Best-effort backup only.
+            }
+
             return fallback;
         }
     }

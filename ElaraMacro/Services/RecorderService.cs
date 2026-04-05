@@ -70,7 +70,7 @@ public sealed class RecorderService : IDisposable
             }
 
             var recorded = Clone(e);
-            recorded.TimestampMs = Environment.TickCount64;
+            recorded.TimestampMs = Environment.TickCount64; // Absolute TickCount64 value; PlayerService.ComputeDelay uses inter-event deltas, so reboot portability is intentionally not required.
             _events.Add(recorded);
         }
     }
