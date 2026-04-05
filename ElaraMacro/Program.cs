@@ -1,3 +1,4 @@
+using System.Threading;
 using ElaraMacro.Services;
 
 namespace ElaraMacro;
@@ -7,17 +8,17 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        ApplicationConfiguration.Initialize();
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += (_, e) =>
-            MessageBox.Show($"Unexpected UI error:\n\n{e.Exception}", "Elara Macro", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
-        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        using var singleInstanceMutex = new Mutex(true, "ElaraMacro_SingleInstance", out var isPrimaryInstance);
+        if (!isPrimaryInstance)
         {
-            var ex = e.ExceptionObject as Exception;
-            MessageBox.Show($"Unexpected fatal error:\n\n{ex}", "Elara Macro", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        };
+            MessageBox.Show("ElaraMacro is already running.", "Elara Macro", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
 
-        Application.Run(new TrayApplicationContext());
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+
+        using var trayContext = new TrayApplicationContext();
+        Application.Run(trayContext);
     }
 }

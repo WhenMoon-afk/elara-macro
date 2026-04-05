@@ -1,51 +1,97 @@
-using System.Diagnostics;
 using ElaraMacro.Models;
 
 namespace ElaraMacro.Services;
 
-public sealed class RecorderService
+public sealed class RecorderService : IDisposable
 {
+    private readonly HookManager _hookManager;
+    private readonly Func<AppSettings> _settingsAccessor;
     private readonly object _gate = new();
-    private readonly Stopwatch _stopwatch = new();
     private readonly List<RecordedEvent> _events = new();
+    private bool _isRecording;
     private Point? _lastMousePoint;
 
-    public bool IsRecording { get; private set; }
+    public RecorderService(HookManager hookManager, Func<AppSettings> settingsAccessor)
+    {
+        _hookManager = hookManager;
+        _settingsAccessor = settingsAccessor;
+
+        _hookManager.KeyDown += OnHookEvent;
+        _hookManager.KeyUp += OnHookEvent;
+        _hookManager.MouseDown += OnHookEvent;
+        _hookManager.MouseUp += OnHookEvent;
+        _hookManager.MouseMove += OnHookEvent;
+        _hookManager.MouseWheel += OnHookEvent;
+    }
 
     public void Start()
     {
-        lock (_gate) { _events.Clear(); _lastMousePoint = null; _stopwatch.Restart(); IsRecording = true; }
+        lock (_gate)
+        {
+            _events.Clear();
+            _lastMousePoint = null;
+            _isRecording = true;
+        }
     }
 
     public List<RecordedEvent> Stop()
     {
-        lock (_gate) { IsRecording = false; _stopwatch.Stop(); return _events.Select(Clone).ToList(); }
+        lock (_gate)
+        {
+            _isRecording = false;
+            return _events.Select(Clone).ToList();
+        }
     }
 
-    public void Process(RecordedEvent e, AppSettings settings)
+    private void OnHookEvent(object? _, RecordedEvent e)
     {
         lock (_gate)
         {
-            if (!IsRecording) return;
+            if (!_isRecording)
+            {
+                return;
+            }
+
             if (e.Kind == EventKind.MouseMove)
             {
-                var pt = new Point(e.X, e.Y);
-                if (_lastMousePoint is Point prev)
+                var current = new Point(e.X, e.Y);
+                if (_lastMousePoint is Point previous)
                 {
-                    if (Math.Abs(prev.X - pt.X) < settings.MouseMoveThresholdPx &&
-                        Math.Abs(prev.Y - pt.Y) < settings.MouseMoveThresholdPx) return;
+                    var deltaX = current.X - previous.X;
+                    var deltaY = current.Y - previous.Y;
+                    var distance = Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY));
+                    if (distance < Math.Max(0, _settingsAccessor().MouseMoveThresholdPx))
+                    {
+                        return;
+                    }
                 }
-                _lastMousePoint = pt;
+
+                _lastMousePoint = current;
             }
-            var copy = Clone(e);
-            copy.TimestampMs = _stopwatch.ElapsedMilliseconds;
-            _events.Add(copy);
+
+            var recorded = Clone(e);
+            recorded.TimestampMs = Environment.TickCount64; // Absolute TickCount64 value; PlayerService.ComputeDelay uses inter-event deltas, so reboot portability is intentionally not required.
+            _events.Add(recorded);
         }
     }
 
     private static RecordedEvent Clone(RecordedEvent e) => new()
     {
-        Kind = e.Kind, X = e.X, Y = e.Y,
-        MouseData = e.MouseData, KeyCode = e.KeyCode, TimestampMs = e.TimestampMs
+        Kind = e.Kind,
+        X = e.X,
+        Y = e.Y,
+        MouseData = e.MouseData,
+        KeyCode = e.KeyCode,
+        TimestampMs = e.TimestampMs
     };
+
+    public void Dispose()
+    {
+        _hookManager.KeyDown -= OnHookEvent;
+        _hookManager.KeyUp -= OnHookEvent;
+        _hookManager.MouseDown -= OnHookEvent;
+        _hookManager.MouseUp -= OnHookEvent;
+        _hookManager.MouseMove -= OnHookEvent;
+        _hookManager.MouseWheel -= OnHookEvent;
+    }
 }

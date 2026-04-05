@@ -6,70 +6,72 @@ namespace ElaraMacro.Services;
 
 public sealed class InputSimulatorService
 {
-    public void ReplayEvent(RecordedEvent e)
+    public void Replay(RecordedEvent e)
     {
-        switch (e.Kind)
+        NativeMethods.INPUT input = e.Kind switch
         {
-            case EventKind.KeyDown:    SendKeyboard(e.KeyCode, false); break;
-            case EventKind.KeyUp:      SendKeyboard(e.KeyCode, true);  break;
-            case EventKind.MouseMove:  MoveMouseAbsolute(e.X, e.Y);    break;
-            case EventKind.LeftDown:   SendMouse(NativeMethods.MOUSEEVENTF_LEFTDOWN);   break;
-            case EventKind.LeftUp:     SendMouse(NativeMethods.MOUSEEVENTF_LEFTUP);     break;
-            case EventKind.RightDown:  SendMouse(NativeMethods.MOUSEEVENTF_RIGHTDOWN);  break;
-            case EventKind.RightUp:    SendMouse(NativeMethods.MOUSEEVENTF_RIGHTUP);    break;
-            case EventKind.MiddleDown: SendMouse(NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
-            case EventKind.MiddleUp:   SendMouse(NativeMethods.MOUSEEVENTF_MIDDLEUP);   break;
-            case EventKind.MouseWheel: SendMouse(NativeMethods.MOUSEEVENTF_WHEEL, (uint)e.MouseData); break;
-        }
-    }
-
-    private static void SendKeyboard(Keys key, bool keyUp)
-    {
-        var input = new NativeMethods.INPUT
-        {
-            type = NativeMethods.INPUT_KEYBOARD,
-            U = new NativeMethods.InputUnion
-            {
-                ki = new NativeMethods.KEYBDINPUT
-                {
-                    wVk = (ushort)key,
-                    dwFlags = keyUp ? NativeMethods.KEYEVENTF_KEYUP : 0
-                }
-            }
+            EventKind.KeyDown => CreateKeyboardInput(e.KeyCode, false),
+            EventKind.KeyUp => CreateKeyboardInput(e.KeyCode, true),
+            EventKind.MouseMove => CreateMouseMoveInput(e.X, e.Y),
+            EventKind.LeftDown => CreateMouseInput(NativeMethods.MOUSEEVENTF_LEFTDOWN),
+            EventKind.LeftUp => CreateMouseInput(NativeMethods.MOUSEEVENTF_LEFTUP),
+            EventKind.RightDown => CreateMouseInput(NativeMethods.MOUSEEVENTF_RIGHTDOWN),
+            EventKind.RightUp => CreateMouseInput(NativeMethods.MOUSEEVENTF_RIGHTUP),
+            EventKind.MiddleDown => CreateMouseInput(NativeMethods.MOUSEEVENTF_MIDDLEDOWN),
+            EventKind.MiddleUp => CreateMouseInput(NativeMethods.MOUSEEVENTF_MIDDLEUP),
+            EventKind.MouseWheel => CreateMouseInput(NativeMethods.MOUSEEVENTF_WHEEL, unchecked((uint)e.MouseData)),
+            _ => throw new ArgumentOutOfRangeException(nameof(e.Kind), e.Kind, "Unsupported event kind")
         };
-        NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
+
+        NativeMethods.SendInput(1, [input], Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
-    private static void MoveMouseAbsolute(int x, int y)
+    private static NativeMethods.INPUT CreateKeyboardInput(Keys key, bool isKeyUp) => new()
     {
-        var sw = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SM_CXSCREEN) - 1);
-        var sh = Math.Max(1, NativeMethods.GetSystemMetrics(NativeMethods.SM_CYSCREEN) - 1);
-        var input = new NativeMethods.INPUT
+        type = NativeMethods.INPUT_KEYBOARD,
+        U = new NativeMethods.InputUnion
+        {
+            ki = new NativeMethods.KEYBDINPUT
+            {
+                wVk = (ushort)key,
+                dwFlags = isKeyUp ? NativeMethods.KEYEVENTF_KEYUP : 0
+            }
+        }
+    };
+
+    private static NativeMethods.INPUT CreateMouseMoveInput(int x, int y)
+    {
+        var bounds = Screen.PrimaryScreen?.Bounds ?? new Rectangle(0, 0, 1, 1);
+        var width = Math.Max(1, bounds.Width - 1);
+        var height = Math.Max(1, bounds.Height - 1);
+        var normalizedX = (int)Math.Round((x - bounds.Left) * 65535d / width);
+        var normalizedY = (int)Math.Round((y - bounds.Top) * 65535d / height);
+
+        return new NativeMethods.INPUT
         {
             type = NativeMethods.INPUT_MOUSE,
             U = new NativeMethods.InputUnion
             {
                 mi = new NativeMethods.MOUSEINPUT
                 {
-                    dx = (int)Math.Round(x * 65535.0 / sw),
-                    dy = (int)Math.Round(y * 65535.0 / sh),
-                    dwFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                    dx = Math.Clamp(normalizedX, 0, 65535),
+                    dy = Math.Clamp(normalizedY, 0, 65535),
+                    dwFlags = NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_MOVE
                 }
             }
         };
-        NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
     }
 
-    private static void SendMouse(uint flags, uint mouseData = 0)
+    private static NativeMethods.INPUT CreateMouseInput(uint flags, uint mouseData = 0) => new()
     {
-        var input = new NativeMethods.INPUT
+        type = NativeMethods.INPUT_MOUSE,
+        U = new NativeMethods.InputUnion
         {
-            type = NativeMethods.INPUT_MOUSE,
-            U = new NativeMethods.InputUnion
+            mi = new NativeMethods.MOUSEINPUT
             {
-                mi = new NativeMethods.MOUSEINPUT { dwFlags = flags, mouseData = mouseData }
+                dwFlags = flags,
+                mouseData = mouseData
             }
-        };
-        NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<NativeMethods.INPUT>());
-    }
+        }
+    };
 }
