@@ -1,0 +1,45 @@
+name: Build & Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore ElaraMacro/ElaraMacro.csproj
+
+      - name: Build (Release x64)
+        run: dotnet build ElaraMacro/ElaraMacro.csproj -c Release -p:Platform=x64 --no-restore
+
+      - name: Publish self-contained
+        run: dotnet publish ElaraMacro/ElaraMacro.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/
+
+      - name: Verify binary exists
+        run: |
+          if (!(Test-Path "publish/ElaraMacro.exe")) {
+            Write-Error "ElaraMacro.exe not found in publish output"
+            exit 1
+          }
+          $size = (Get-Item "publish/ElaraMacro.exe").length / 1MB
+          Write-Host "Binary size: $([math]::Round($size,1)) MB"
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ElaraMacro-win-x64
+          path: publish/ElaraMacro.exe
+          retention-days: 14
