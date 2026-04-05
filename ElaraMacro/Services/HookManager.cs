@@ -89,13 +89,14 @@ public sealed class HookManager : IDisposable
         _keyboardHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _keyboardProc, module, 0);
         _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseProc, module, 0);
 
-        _threadReady.Set();
-
         if (_keyboardHook == IntPtr.Zero || _mouseHook == IntPtr.Zero)
         {
             CleanupHooks();
+            _threadReady.Set();
             return;
         }
+
+        _threadReady.Set();
 
         while (NativeMethods.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
         {

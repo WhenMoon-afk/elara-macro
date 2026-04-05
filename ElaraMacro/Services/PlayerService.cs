@@ -6,7 +6,8 @@ public sealed class PlayerService
 {
     private readonly InputSimulatorService _simulator;
     private readonly SemaphoreSlim _pauseSemaphore = new(1, 1);
-    private volatile bool _isPaused;
+    private readonly object _pauseLock = new();
+    private bool _isPaused;
 
     public PlayerService(InputSimulatorService simulator)
     {
@@ -15,32 +16,27 @@ public sealed class PlayerService
 
     public void Pause()
     {
-        if (_isPaused)
+        lock (_pauseLock)
         {
-            return;
+            if (_isPaused) return;
+            _isPaused = true;
         }
-
         _pauseSemaphore.Wait();
-        _isPaused = true;
     }
 
     public void Resume()
     {
-        if (!_isPaused)
+        lock (_pauseLock)
         {
-            return;
+            if (!_isPaused) return;
+            _isPaused = false;
+            _pauseSemaphore.Release();
         }
-
-        _isPaused = false;
-        _pauseSemaphore.Release();
     }
 
     public async Task PlayAsync(List<RecordedEvent> events, AppSettings settings, CancellationToken ct)
     {
-        if (events.Count == 0)
-        {
-            return;
-        }
+        if (events.Count == 0) return;
 
         var orderedEvents = events.OrderBy(e => e.TimestampMs).ToList();
         var loops = settings.LoopCount == 0 ? int.MaxValue : Math.Max(0, settings.LoopCount);
@@ -67,16 +63,8 @@ public sealed class PlayerService
 
     private static int ComputeDelay(int index, IReadOnlyList<RecordedEvent> orderedEvents, AppSettings settings)
     {
-        if (index == 0)
-        {
-            return 0;
-        }
-
-        if (settings.NormalizeTiming)
-        {
-            return Math.Max(0, settings.NormalizedDelayMs);
-        }
-
+        if (index == 0) return 0;
+        if (settings.NormalizeTiming) return Math.Max(0, settings.NormalizedDelayMs);
         var delta = orderedEvents[index].TimestampMs - orderedEvents[index - 1].TimestampMs;
         return (int)Math.Max(0, delta);
     }

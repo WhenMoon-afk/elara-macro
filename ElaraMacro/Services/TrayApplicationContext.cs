@@ -66,28 +66,35 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     public void StartOrStopRecording()
     {
+        var shouldRefresh = false;
+
         lock (_stateGate)
         {
             if (_state == AppState.Recording)
             {
                 StopRecordingInternal();
-                return;
+                shouldRefresh = true;
             }
-
-            if (_state != AppState.Idle)
+            else if (_state == AppState.Idle)
             {
-                return;
+                _workingMacro = null;
+                _recorder.Start();
+                SetStateStatus(AppState.Recording, "Recording...");
+                shouldRefresh = true;
             }
+        }
 
-            _workingMacro = null;
-            _recorder.Start();
-            SetStateStatus(AppState.Recording, "Recording...");
+        if (shouldRefresh)
+        {
+            RefreshUi();
         }
     }
 
     public void PlaySelected()
     {
-        Macro? macro;
+        Macro? macro = null;
+        CancellationToken token = default;
+
         lock (_stateGate)
         {
             if (_state != AppState.Idle)
@@ -104,45 +111,69 @@ public sealed class TrayApplicationContext : ApplicationContext
             _playbackCts?.Cancel();
             _playbackCts?.Dispose();
             _playbackCts = new CancellationTokenSource();
+            token = _playbackCts.Token;
             SetStateStatus(AppState.Playing, "Playing...");
         }
 
-        _ = RunPlaybackAsync(macro.Events, _playbackCts.Token);
+        RefreshUi();
+        _ = RunPlaybackAsync(macro.Events, token);
     }
 
     public void PauseOrResume()
     {
+        bool pause;
+        bool resume;
+
         lock (_stateGate)
         {
-            if (_state == AppState.Playing)
-            {
-                _player.Pause();
-                SetStateStatus(AppState.Paused, "Paused");
-            }
-            else if (_state == AppState.Paused)
-            {
-                _player.Resume();
-                SetStateStatus(AppState.Playing, "Playing...");
-            }
+            pause = _state == AppState.Playing;
+            resume = _state == AppState.Paused;
+            if (pause) SetStateStatus(AppState.Paused, "Paused");
+            else if (resume) SetStateStatus(AppState.Playing, "Playing...");
+        }
+
+        if (pause) _player.Pause();
+        else if (resume) _player.Resume();
+
+        if (pause || resume)
+        {
+            RefreshUi();
         }
     }
 
     public void StopPlaybackOrRecording()
     {
+        bool shouldResume;
+        bool shouldRefresh = false;
+
         lock (_stateGate)
         {
             if (_state == AppState.Recording)
             {
                 StopRecordingInternal();
-                return;
+                shouldRefresh = true;
+                shouldResume = false;
             }
-
-            if (_state is AppState.Playing or AppState.Paused)
+            else
             {
-                _playbackCts?.Cancel();
-                _player.Resume();
-                SetStateStatus(AppState.Idle, "Idle");
+                shouldResume = _state is AppState.Playing or AppState.Paused;
+                if (shouldResume)
+                {
+                    _playbackCts?.Cancel();
+                    SetStateStatus(AppState.Idle, "Idle");
+                    shouldRefresh = true;
+                }
             }
+        }
+
+        if (shouldResume)
+        {
+            _player.Resume();
+        }
+
+        if (shouldRefresh)
+        {
+            RefreshUi();
         }
     }
 
@@ -234,6 +265,8 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     public void SelectMacro(Guid id, IWin32Window owner)
     {
+        var shouldRefresh = false;
+
         lock (_stateGate)
         {
             if (_workingMacro is not null && _state == AppState.Idle)
@@ -241,17 +274,26 @@ public sealed class TrayApplicationContext : ApplicationContext
                 var result = MessageBox.Show(owner, "You have an unsaved recording. Discard it?", "Elara Macro", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (result != DialogResult.Yes)
                 {
-                    RefreshUi();
-                    return;
+                    shouldRefresh = true;
                 }
-
-                _workingMacro = null;
+                else
+                {
+                    _workingMacro = null;
+                    _selectedId = id;
+                    shouldRefresh = true;
+                }
             }
-
-            _selectedId = id;
+            else
+            {
+                _selectedId = id;
+                shouldRefresh = true;
+            }
         }
 
-        RefreshUi();
+        if (shouldRefresh)
+        {
+            RefreshUi();
+        }
     }
 
     public void UpdateSettings(Action<AppSettings> mutate)
@@ -332,7 +374,12 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
         finally
         {
-            SetStateStatus(AppState.Idle, "Idle");
+            lock (_stateGate)
+            {
+                SetStateStatus(AppState.Idle, "Idle");
+            }
+
+            RefreshUi();
         }
     }
 
@@ -364,7 +411,6 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _state = state;
         _statusText = statusText;
-        RefreshUi();
     }
 
     private void RefreshUi()
@@ -436,8 +482,6 @@ public sealed class TrayApplicationContext : ApplicationContext
         NativeMethods.UnregisterHotKey(_hotkeyWindow.Handle, HotkeyPauseId);
         NativeMethods.UnregisterHotKey(_hotkeyWindow.Handle, HotkeyStopId);
 
-        _hookManager.Dispose();
-        _recorder.Dispose();
 
         _storage.SaveSettings(_settings);
         _storage.SaveMacros(_macros);
